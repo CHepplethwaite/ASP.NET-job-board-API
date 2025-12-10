@@ -48,3 +48,6 @@ secrets.json
 # Others
 *.vspscc
 *.vssscc
+
+# misc
+*.txt
