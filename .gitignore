@@ -1,0 +1,50 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build results
+bin/
+obj/
+Debug/
+Release/
+App_Data/
+
+# Rider
+.idea/
+
+# ASP.NET specific
+wwwroot/lib/
+node_modules/
+
+# NuGet packages
+*.nupkg
+packages/
+*.snupkg
+
+# Resharper
+_ReSharper*/
+*.DotSettings.user
+
+# SQL Server files
+*.mdf
+*.ldf
+
+# IIS Express
+IISExpress/
+
+# Publish Web Output
+*.Publish.xml
+
+# Logs
+*.log
+
+# Sensitive files
+appsettings.*.json
+secrets.json
+
+# Others
+*.vspscc
+*.vssscc
