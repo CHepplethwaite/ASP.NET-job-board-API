@@ -1,6 +1,108 @@
-﻿namespace backend.Infrastructure.Repositories
+﻿using Core.Entities;
+using Core.Interfaces.Repositories;
+using Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
+namespace Infrastructure.Repositories;
+
+public class UserRepository : IUserRepository
 {
-    public class UserRepository
+    private readonly ApplicationDbContext _context;
+
+    public UserRepository(ApplicationDbContext context)
     {
+        _context = context;
+    }
+
+    public async Task<User?> GetByIdAsync(Guid id)
+    {
+        return await _context.Users
+            .Include(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.Id == id);
+    }
+
+    public async Task<User?> GetByEmailAsync(string email)
+    {
+        return await _context.Users
+            .FirstOrDefaultAsync(u => u.Email == email || u.NormalizedEmail == email.ToUpper());
+    }
+
+    public async Task<User?> GetByEmailWithRolesAsync(string email)
+    {
+        return await _context.Users
+            .Include(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.Email == email || u.NormalizedEmail == email.ToUpper());
+    }
+
+    public async Task<IEnumerable<User>> GetAllAsync(int page, int pageSize)
+    {
+        return await _context.Users
+            .Include(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+    }
+
+    public async Task AddAsync(User user)
+    {
+        await _context.Users.AddAsync(user);
+    }
+
+    public async Task UpdateAsync(User user)
+    {
+        user.UpdatedAt = DateTime.UtcNow;
+        _context.Users.Update(user);
+    }
+
+    public async Task DeleteAsync(User user)
+    {
+        _context.Users.Remove(user);
+    }
+
+    public async Task<bool> ExistsByEmailAsync(string email)
+    {
+        return await _context.Users
+            .AnyAsync(u => u.Email == email || u.NormalizedEmail == email.ToUpper());
+    }
+
+    public async Task AddUserRoleAsync(Guid userId, int roleId)
+    {
+        var userRole = new UserRole
+        {
+            UserId = userId,
+            RoleId = roleId
+        };
+
+        await _context.UserRoles.AddAsync(userRole);
+    }
+
+    public async Task RemoveUserRoleAsync(Guid userId, int roleId)
+    {
+        var userRole = await _context.UserRoles
+            .FirstOrDefaultAsync(ur => ur.UserId == userId && ur.RoleId == roleId);
+
+        if (userRole != null)
+        {
+            _context.UserRoles.Remove(userRole);
+        }
+    }
+
+    public async Task<IEnumerable<string>> GetUserRolesAsync(Guid userId)
+    {
+        return await _context.UserRoles
+            .Where(ur => ur.UserId == userId)
+            .Include(ur => ur.Role)
+            .Select(ur => ur.Role.Name)
+            .ToListAsync();
+    }
+
+    public async Task<bool> IsInRoleAsync(Guid userId, string role)
+    {
+        return await _context.UserRoles
+            .Include(ur => ur.Role)
+            .AnyAsync(ur => ur.UserId == userId && ur.Role.Name == role);
     }
 }

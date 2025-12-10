@@ -1,6 +1,12 @@
-﻿namespace backend.Core.Entities
+﻿namespace Core.Entities;
+
+public class UserRole
 {
-    public class UserRole
-    {
-    }
+    public Guid UserId { get; set; }
+    public int RoleId { get; set; }
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+
+    // Navigation properties
+    public virtual User User { get; set; } = null!;
+    public virtual Role Role { get; set; } = null!;
 }

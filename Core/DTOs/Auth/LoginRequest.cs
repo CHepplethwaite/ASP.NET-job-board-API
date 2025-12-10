@@ -1,6 +1,13 @@
-﻿namespace backend.Core.DTOs.Auth
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace Core.DTOs.Auth;
+
+public class LoginRequest
 {
-    public class LoginRequest
-    {
-    }
+    [Required]
+    [EmailAddress]
+    public string Email { get; set; } = null!;
+
+    [Required]
+    public string Password { get; set; } = null!;
 }

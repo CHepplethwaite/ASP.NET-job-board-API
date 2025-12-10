@@ -1,6 +1,10 @@
-﻿namespace backend.Core.DTOs.Auth
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace Core.DTOs.Auth;
+
+public class ForgotPasswordRequest
 {
-    public class ForgotPasswordRequest
-    {
-    }
+    [Required]
+    [EmailAddress]
+    public string Email { get; set; } = null!;
 }

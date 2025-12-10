@@ -1,6 +1,10 @@
-﻿namespace backend.Core.Enums
+﻿namespace Core.Enums;
+
+public enum UserRole
 {
-    public class UserRole
-    {
-    }
+    Admin = 1,
+    Recruiter = 2,
+    JobSeeker = 3,
+    Moderator = 4,
+    CompanyAdmin = 5
 }

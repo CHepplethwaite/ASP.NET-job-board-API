@@ -1,6 +1,8 @@
-﻿namespace backend.Core.Interfaces.Services
+﻿namespace Core.Interfaces.Services;
+
+public interface IEmailService
 {
-    public interface IEmailService
-    {
-    }
+    Task SendEmailVerificationAsync(string email, string verificationCode, string name);
+    Task SendPasswordResetEmailAsync(string email, string resetToken, string name);
+    Task SendWelcomeEmailAsync(string email, string name);
 }

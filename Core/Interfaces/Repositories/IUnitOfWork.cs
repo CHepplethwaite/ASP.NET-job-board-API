@@ -1,6 +1,10 @@
-﻿namespace backend.Core.Interfaces.Repositories
+﻿namespace Core.Interfaces.Repositories;
+
+public interface IUnitOfWork : IDisposable
 {
-    public interface IUnitOfWork
-    {
-    }
+    IUserRepository Users { get; }
+    Task<int> CompleteAsync();
+    Task BeginTransactionAsync();
+    Task CommitTransactionAsync();
+    Task RollbackTransactionAsync();
 }
