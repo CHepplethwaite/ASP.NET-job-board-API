@@ -1,13 +1,9 @@
-﻿
----
+﻿![Status](https://img.shields.io/badge/Status-In%20Development-yellow) 
 
-![Status](https://img.shields.io/badge/Status-In%20Development-yellow)
+# ASP.NET Job Board Backend API
 
-# ASP.NET Job Board Backend (API)
-
-A modern, **production-ready recruitment backend built with ASP.NET 9**.
-It provides a RESTful API for managing job listings, candidate applications, and recruiter workflows.
-The backend is designed for scalability, security, and integration with any frontend (Angular, React, mobile apps).
+A modern, production-ready **recruitment platform backend built with ASP.NET 9**.  
+Designed with a **microservice architecture**, it provides APIs for candidates, employers, and recruiters to interact with job listings, applications, and user profiles.  
 
 ---
 
@@ -17,9 +13,9 @@ The backend is designed for scalability, security, and integration with any fron
 
 * Create and update profile
 * Upload CV / resume
-* Browse job listings
+* Browse job listings via API
 * Save jobs for later
-* Apply directly via API endpoints
+* Apply directly through API endpoints
 
 ### 🔹 Employers / Recruiters
 
@@ -30,38 +26,41 @@ The backend is designed for scalability, security, and integration with any fron
 
 ### 🔹 Core System
 
-* Secure authentication (JWT, registration, login, logout)
-* Role-based access (employer vs applicant)
+* Secure authentication & authorization (JWT, Identity)
+* Role-based access (Employer vs Candidate)
 * Search and filter jobs by category, location, type
-* API-first design for mobile and web clients
-* Logging and error handling
+* Scalable microservices architecture
+* RESTful API endpoints ready for mobile or frontend integration
 
 ---
 
 ## 🏗️ Tech Stack
 
-* **Backend:** ASP.NET 9 Web API
-* **Database:** SQL Server (recommended) or PostgreSQL
-* **ORM:** Entity Framework Core
-* **Authentication:** JWT Bearer tokens
-* **File Storage:** Local or cloud storage for resumes
-* **Deployment Ready:** Docker, Azure App Service, or IIS
+* **Backend:** ASP.NET 9 Web API (.NET 9)
+* **Database:** SQL Server / PostgreSQL
+* **Authentication:** ASP.NET Core Identity + JWT
+* **Storage:** Azure Blob Storage / Local file system for resumes
+* **Containerization:** Docker / Docker Compose for microservices
+* **Deployment Ready:** Kestrel / Nginx / IIS
+* **API Documentation:** Swagger / OpenAPI
 
 ---
 
 ## 📦 Project Structure
 
 ```
-JobBoardAPI/
-├── Controllers/      # API controllers
-├── Models/           # Entity models
-├── DTOs/             # Data transfer objects
-├── Services/         # Business logic
-├── Repositories/     # Database interactions
-├── Migrations/       # EF Core database migrations
-├── Middleware/       # Custom middleware (logging, error handling)
-├── appsettings.json  # Configuration
-└── Program.cs        # Entry point
+
+JobBoard/
+├── src/
+│   ├── JobService/          # Microservice for job listings
+│   ├── CandidateService/    # Microservice for candidate profiles & resumes
+│   ├── EmployerService/     # Microservice for employers and recruiters
+│   ├── ApplicationService/  # Microservice for job applications workflow
+│   ├── AuthService/         # Microservice for authentication & roles
+│   └── Shared/              # Shared models, DTOs, utilities
+├── tests/                   # Unit & integration tests
+└── docker-compose.yml       # Orchestration for all microservices
+
 ```
 
 ---
@@ -70,33 +69,33 @@ JobBoardAPI/
 
 ### Candidate
 
-* Create and manage professional profile
+* Create and manage profile
 * Upload and manage resume
 * Browse and apply for jobs
-* Track application status via API
+* Track application status
 
 ### Employer
 
 * Create company profile
 * Post and manage job listings
-* Review and shortlist applicants
-* Access analytics endpoints
+* Review applicants and shortlist
+* Manage company branding
 
 ---
 
 ## 📊 Roadmap
 
-* [ ] Resume parsing / AI matching
-* [ ] Email notifications via SMTP / SendGrid
+* [ ] Resume parsing and AI-based CV matching
+* [ ] Email notifications via microservice
 * [ ] Application status tracking (accepted / rejected / interview)
-* [ ] Integration with external job portals
-* [ ] Recruiter analytics endpoints
-* [ ] Company branding API
-* [ ] Mobile app integration
+* [ ] Job scraping from external portals
+* [ ] Recruiter analytics dashboard
+* [ ] Multi-tenant support for companies
+* [ ] Mobile and frontend API integration
 
 ---
 
 ## 🤝 Contributions
 
-PRs and feature suggestions are welcome.
+PRs and feature suggestions are welcome.  
 Please open an issue before submitting major changes.
