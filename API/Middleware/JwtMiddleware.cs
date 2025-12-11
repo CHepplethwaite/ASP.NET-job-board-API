@@ -21,17 +21,25 @@ public class JwtMiddleware
         var token = context.Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last();
 
         if (token != null)
-            await AttachUserToContext(context, currentUserService, token);
+            AttachUserToContext(context, currentUserService, token);
 
         await _next(context);
     }
 
-    private async Task AttachUserToContext(HttpContext context, ICurrentUserService currentUserService, string token)
+    private void AttachUserToContext(HttpContext context, ICurrentUserService currentUserService, string token)
     {
         try
         {
+            var secret = _configuration["JwtSettings:Secret"];
+
+            // Check if secret is configured
+            if (string.IsNullOrEmpty(secret))
+            {
+                return;
+            }
+
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.ASCII.GetBytes(_configuration["JwtSettings:Secret"]);
+            var key = Encoding.ASCII.GetBytes(secret);
 
             tokenHandler.ValidateToken(token, new TokenValidationParameters
             {

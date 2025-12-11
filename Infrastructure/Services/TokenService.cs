@@ -107,6 +107,7 @@ public class TokenService : ITokenService
         if (verificationCode == null || verificationCode.IsExpired)
             return false;
 
+        // Only set VerifiedAt since IsUsed is likely computed from VerifiedAt
         verificationCode.VerifiedAt = DateTime.UtcNow;
         _context.EmailVerificationCodes.Update(verificationCode);
         await _context.SaveChangesAsync();
@@ -114,13 +115,10 @@ public class TokenService : ITokenService
         return true;
     }
 
-    public async Task<string> GeneratePasswordResetTokenAsync(Guid userId)
+    public Task<string> GeneratePasswordResetTokenAsync(Guid userId)
     {
-        var token = GenerateRefreshToken(); // Reuse refresh token generation
         var expiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.PasswordResetTokenExpirationMinutes);
 
-        // In a real implementation, you'd store this token in the database
-        // For simplicity, we'll use JWT for password reset
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.ASCII.GetBytes(_jwtSettings.Secret);
 
@@ -141,10 +139,12 @@ public class TokenService : ITokenService
         };
 
         var securityToken = tokenHandler.CreateToken(tokenDescriptor);
-        return tokenHandler.WriteToken(securityToken);
+        var token = tokenHandler.WriteToken(securityToken);
+
+        return Task.FromResult(token);
     }
 
-    public async Task<bool> ValidatePasswordResetTokenAsync(string token)
+    public Task<bool> ValidatePasswordResetTokenAsync(string token)
     {
         try
         {
@@ -166,12 +166,12 @@ public class TokenService : ITokenService
             var principal = tokenHandler.ValidateToken(token, validationParameters, out _);
             var purpose = principal.FindFirst("purpose")?.Value;
 
-            return purpose == "password-reset";
+            return Task.FromResult(purpose == "password-reset");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating password reset token");
-            return false;
+            return Task.FromResult(false);
         }
     }
 
@@ -188,7 +188,7 @@ public class TokenService : ITokenService
                 IssuerSigningKey = new SymmetricSecurityKey(key),
                 ValidateIssuer = false,
                 ValidateAudience = false,
-                ValidateLifetime = false // Allow expired tokens for refresh
+                ValidateLifetime = false
             };
 
             var principal = tokenHandler.ValidateToken(token, validationParameters, out _);

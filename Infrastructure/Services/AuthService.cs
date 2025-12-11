@@ -264,16 +264,13 @@ public class AuthService : IAuthService
         return !await _unitOfWork.Users.ExistsByEmailAsync(email);
     }
 
-    public async Task<AuthResponse> ExternalLoginAsync(string provider, string idToken)
+    public Task<AuthResponse> ExternalLoginAsync(string provider, string idToken) // Pending implementation
     {
-        // This is a placeholder. In a real implementation, you would:
-        // 1. Validate the idToken with the OAuth provider (Google, LinkedIn, etc.)
-        // 2. Extract user information
-        // 3. Create or update user in database
-        // 4. Generate JWT tokens
-
-        throw new NotImplementedException("External login implementation depends on OAuth provider configuration");
+        return Task.FromException<AuthResponse>(
+            new NotImplementedException("External login implementation depends on OAuth provider configuration")
+        );
     }
+
 
     private async Task SaveRefreshTokenAsync(Guid userId, string refreshToken)
     {
@@ -288,7 +285,7 @@ public class AuthService : IAuthService
         await _unitOfWork.CompleteAsync();
     }
 
-    private async Task<RefreshToken?> GetRefreshTokenAsync(string token)
+    private Task<RefreshToken?> GetRefreshTokenAsync(string token)
     {
         // Implement based on your database context
         throw new NotImplementedException();

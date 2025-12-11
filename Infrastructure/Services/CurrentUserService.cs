@@ -32,17 +32,19 @@ public class CurrentUserService : ICurrentUserService
 
     public bool IsAuthenticated => UserId.HasValue;
 
-    public async Task<bool> IsInRoleAsync(string role)
+    public Task<bool> IsInRoleAsync(string role)
     {
-        return _httpContextAccessor.HttpContext?.User?
-            .IsInRole(role) ?? false;
+        return Task.FromResult(_httpContextAccessor.HttpContext?.User?
+            .IsInRole(role) ?? false);
     }
 
-    public async Task<IList<string>> GetRolesAsync()
+    public Task<IList<string>> GetRolesAsync()
     {
-        return _httpContextAccessor.HttpContext?.User?
+        IList<string> roles = _httpContextAccessor.HttpContext?.User?
             .FindAll(ClaimTypes.Role)
             .Select(c => c.Value)
             .ToList() ?? new List<string>();
+
+        return Task.FromResult(roles);
     }
 }

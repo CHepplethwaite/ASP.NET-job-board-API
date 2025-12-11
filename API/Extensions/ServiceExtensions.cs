@@ -42,6 +42,11 @@ public static class ServiceExtensions
     {
         var jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>();
 
+        if (jwtSettings == null || string.IsNullOrEmpty(jwtSettings.Secret))
+        {
+            throw new InvalidOperationException("JwtSettings or JwtSettings.Secret is not configured properly.");
+        }
+
         services.AddAuthentication(options =>
         {
             options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -67,7 +72,7 @@ public static class ServiceExtensions
                 {
                     if (context.Exception.GetType() == typeof(SecurityTokenExpiredException))
                     {
-                        context.Response.Headers.Add("Token-Expired", "true");
+                        context.Response.Headers.Append("Token-Expired", "true");
                     }
                     return Task.CompletedTask;
                 }

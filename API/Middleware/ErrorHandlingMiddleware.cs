@@ -37,12 +37,13 @@ public class ErrorHandlingMiddleware
     {
         context.Response.ContentType = "application/json";
 
-        var response = new
+        // Base response with nullable detail
+        object response = new
         {
             type = "https://tools.ietf.org/html/rfc7231#section-6.6.1",
             title = "An error occurred while processing your request.",
             status = HttpStatusCode.InternalServerError,
-            detail = _env.IsDevelopment() ? exception.Message : null,
+            detail = _env.IsDevelopment() ? exception.Message : (string?)null,
             instance = context.Request.Path,
             traceId = context.TraceIdentifier
         };

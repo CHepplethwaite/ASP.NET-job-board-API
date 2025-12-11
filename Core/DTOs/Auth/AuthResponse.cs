@@ -1,5 +1,4 @@
-﻿using backend.Core.DTOs.User;
-using Core.DTOs.User;
+﻿using Core.DTOs.User;
 
 namespace Core.DTOs.Auth;
 
