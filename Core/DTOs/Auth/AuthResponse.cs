@@ -1,11 +1,19 @@
 ﻿using Core.DTOs.User;
 
-namespace Core.DTOs.Auth;
-
-public class AuthResponse
+namespace backend.Core.DTOs.Auth
 {
-    public string AccessToken { get; set; } = null!;
-    public string RefreshToken { get; set; } = null!;
-    public DateTime ExpiresAt { get; set; }
-    public UserDto User { get; set; } = null!;
+    public class AuthResponse
+    {
+        public string Token { get; set; }
+        public string RefreshToken { get; set; }
+        public DateTime TokenExpiry { get; set; }
+        public UserDto User { get; set; }
+    }
+
+    public class TokenResponse
+    {
+        public string Token { get; set; }
+        public string RefreshToken { get; set; }
+        public DateTime TokenExpiry { get; set; }
+    }
 }

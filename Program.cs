@@ -1,54 +1,76 @@
-using API.Extensions;
-using API.Middleware;
-using Infrastructure.Data;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+using backend.API.Extensions;
+using backend.Core.Entities;
+using backend.Core.Enums;
+using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container
+// Add services
+builder.Services.AddApplicationServices(builder.Configuration);
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// Configure application services
-builder.Services.AddApplicationServices(builder.Configuration);
-builder.Services.AddJwtAuthentication(builder.Configuration);
-builder.Services.AddSwaggerWithAuth();
-builder.Services.AddCorsPolicy(builder.Configuration);
-
-// Add health checks with a simple check
-builder.Services.AddHealthChecks()
-    .AddCheck("self", () => HealthCheckResult.Healthy());
-
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
+// Configure pipeline
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-    app.UseDeveloperExceptionPage();
 }
 
 app.UseHttpsRedirection();
-app.UseCors("CorsPolicy");
-
-// Custom middleware
-app.UseMiddleware<ErrorHandlingMiddleware>();
-app.UseMiddleware<JwtMiddleware>();
-
+app.UseStaticFiles(); // For file uploads
+app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseApplicationMiddleware();
 
 app.MapControllers();
-app.MapHealthChecks("/health");
 
-// Initialize database
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    dbContext.Database.EnsureCreated();
-    // In production, use migrations instead:
-    // dbContext.Database.Migrate();
-}
+// Seed data
+await SeedData(app);
 
 app.Run();
+
+async Task SeedData(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<Role>>();
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+
+    // Seed roles
+    var roles = Enum.GetNames(typeof(UserType));
+    foreach (var role in roles)
+    {
+        if (!await roleManager.RoleExistsAsync(role))
+        {
+            await roleManager.CreateAsync(new Role { Name = role });
+        }
+    }
+
+    // Seed admin user
+    var adminEmail = "admin@recruitment.com";
+    var adminUser = await userManager.FindByEmailAsync(adminEmail);
+    if (adminUser == null)
+    {
+        adminUser = new User
+        {
+            UserName = adminEmail,
+            Email = adminEmail,
+            FirstName = "Admin",
+            LastName = "User",
+            UserType = UserType.Admin,
+            EmailConfirmed = true,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var result = await userManager.CreateAsync(adminUser, "Admin@123");
+        if (result.Succeeded)
+        {
+            await userManager.AddToRoleAsync(adminUser, UserType.Admin.ToString());
+        }
+    }
+}

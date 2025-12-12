@@ -1,14 +1,13 @@
-﻿using Core.Entities;
+﻿using System.Security.Claims;
+using backend.Core.Entities;
 
-namespace Core.Interfaces.Services;
-
-public interface ITokenService
+namespace backend.Core.Interfaces.Services
 {
-    string GenerateAccessToken(User user);
-    string GenerateRefreshToken();
-    Task<string> GenerateEmailVerificationCodeAsync(Guid userId);
-    Task<bool> ValidateEmailVerificationCodeAsync(Guid userId, string code);
-    Task<string> GeneratePasswordResetTokenAsync(Guid userId);
-    Task<bool> ValidatePasswordResetTokenAsync(string token);
-    Guid? GetUserIdFromExpiredToken(string token);
+    public interface ITokenService
+    {
+        string GenerateJwtToken(User user);
+        string GenerateRefreshToken();
+        ClaimsPrincipal GetPrincipalFromExpiredToken(string token);
+        Task<User?> GetUserFromTokenAsync(string token);
+    }
 }

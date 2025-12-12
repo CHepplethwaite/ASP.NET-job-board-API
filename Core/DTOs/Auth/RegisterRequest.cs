@@ -1,43 +1,31 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Core.DTOs.Auth;
-
-public class RegisterRequest
+namespace backend.Core.DTOs.Auth
 {
-    [Required]
-    [EmailAddress]
-    [MaxLength(100)]
-    public string Email { get; set; } = null!;
+    public class RegisterRequest
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; }
 
-    [Required]
-    [MinLength(2)]
-    [MaxLength(100)]
-    public string FirstName { get; set; } = null!;
+        [Required]
+        [StringLength(100, MinimumLength = 6)]
+        public string Password { get; set; }
 
-    [Required]
-    [MinLength(2)]
-    [MaxLength(100)]
-    public string LastName { get; set; } = null!;
+        [Required]
+        [MaxLength(100)]
+        public string FirstName { get; set; }
 
-    [Required]
-    [MinLength(6)]
-    [MaxLength(100)]
-    public string Password { get; set; } = null!;
+        [Required]
+        [MaxLength(100)]
+        public string LastName { get; set; }
 
-    [Required]
-    [Compare("Password")]
-    public string ConfirmPassword { get; set; } = null!;
+        [Phone]
+        public string? PhoneNumber { get; set; }
 
-    [Required]
-    public string Role { get; set; } = null!; // "Recruiter" or "JobSeeker"
+        [Required]
+        public string UserType { get; set; } // "JobSeeker", "Recruiter", "Company"
 
-    [MaxLength(100)]
-    public string? CompanyName { get; set; }
-
-    [MaxLength(100)]
-    public string? JobTitle { get; set; }
-
-    [MaxLength(20)]
-    [Phone]
-    public string? PhoneNumber { get; set; }
+        public string? CompanyName { get; set; }
+    }
 }

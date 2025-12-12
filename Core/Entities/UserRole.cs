@@ -1,12 +1,18 @@
-﻿namespace Core.Entities;
-
-public class UserRole
+﻿namespace backend.Core.Enums
 {
-    public Guid UserId { get; set; }
-    public int RoleId { get; set; }
-    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+    public enum UserType
+    {
+        JobSeeker,
+        Recruiter,
+        Company,
+        Admin
+    }
 
-    // Navigation properties
-    public virtual User User { get; set; } = null!;
-    public virtual Role Role { get; set; } = null!;
+    public enum AuthProvider
+    {
+        Local,
+        Google,
+        LinkedIn,
+        Microsoft
+    }
 }

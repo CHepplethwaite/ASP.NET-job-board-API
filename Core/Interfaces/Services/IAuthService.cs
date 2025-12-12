@@ -1,18 +1,18 @@
-﻿using Core.DTOs.Auth;
-using Core.Entities;
+﻿using backend.Core.DTOs.Auth;
 
-namespace Core.Interfaces.Services;
-
-public interface IAuthService
+namespace backend.Core.Interfaces.Services
 {
-    Task<AuthResponse> RegisterAsync(RegisterRequest request);
-    Task<AuthResponse> LoginAsync(LoginRequest request);
-    Task<AuthResponse> RefreshTokenAsync(string refreshToken);
-    Task VerifyEmailAsync(VerifyEmailRequest request);
-    Task SendVerificationEmailAsync(string email);
-    Task SendPasswordResetEmailAsync(ForgotPasswordRequest request);
-    Task ResetPasswordAsync(ResetPasswordRequest request);
-    Task RevokeRefreshTokenAsync(string refreshToken);
-    Task<bool> IsEmailAvailableAsync(string email);
-    Task<AuthResponse> ExternalLoginAsync(string provider, string idToken);
+    public interface IAuthService
+    {
+        Task<AuthResponse> RegisterAsync(RegisterRequest request);
+        Task<AuthResponse> LoginAsync(LoginRequest request);
+        Task<TokenResponse> RefreshTokenAsync(RefreshTokenRequest request);
+        Task VerifyEmailAsync(VerifyEmailRequest request);
+        Task ResendVerificationEmailAsync(ResendVerificationEmailRequest request);
+        Task ForgotPasswordAsync(ForgotPasswordRequest request);
+        Task ResetPasswordAsync(ResetPasswordRequest request);
+        Task LogoutAsync(string userId);
+        Task<AuthResponse> ExternalLoginAsync(ExternalLoginRequest request);
+        Task<bool> CheckEmailAvailabilityAsync(string email);
+    }
 }

@@ -1,68 +1,24 @@
-﻿using Core.Enums;
-using System.ComponentModel.DataAnnotations;
+﻿using backend.Core.Entities;
+using backend.Core.Enums;
+using Microsoft.AspNetCore.Identity;
 
-namespace Core.Entities;
-
-public class User
+public class User : IdentityUser
 {
-    [Key]
-    public Guid Id { get; set; } = Guid.NewGuid();
-
-    [Required]
-    [EmailAddress]
-    [MaxLength(100)]
-    public string Email { get; set; } = null!;
-
-    [MaxLength(100)]
-    public string? NormalizedEmail { get; set; }
-
-    [Required]
-    [MaxLength(100)]
-    public string FirstName { get; set; } = null!;
-
-    [Required]
-    [MaxLength(100)]
-    public string LastName { get; set; } = null!;
-
-    [MaxLength(255)]
-    public string? PasswordHash { get; set; }
-
-    [MaxLength(255)]
-    public string? ProfilePictureUrl { get; set; }
-
-    [MaxLength(20)]
-    public string? PhoneNumber { get; set; }
-
-    [MaxLength(100)]
+    public string FirstName { get; set; }
+    public string LastName { get; set; }
     public string? CompanyName { get; set; }
+    public UserType UserType { get; set; }
+    public string? ProfilePictureUrl { get; set; }
+    public bool IsActive { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 
-    [MaxLength(100)]
-    public string? JobTitle { get; set; }
-
-    public bool IsEmailVerified { get; set; } = false;
-
-    public bool IsActive { get; set; } = true;
-
-    public bool IsBanned { get; set; } = false;
-
-    public DateTime? EmailVerifiedAt { get; set; }
-
-    public DateTime? LastLoginAt { get; set; }
-
-    [Required]
-    public AuthProvider AuthProvider { get; set; } = AuthProvider.Local;
-
-    [MaxLength(255)]
-    public string? ProviderKey { get; set; }
-
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? UpdatedAt { get; set; }
+    // These are still needed for JWT refresh tokens
+    public string? RefreshToken { get; set; }
+    public DateTime? RefreshTokenExpiryTime { get; set; }
 
     // Navigation properties
-    public virtual ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
-    public virtual ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
-    public virtual ICollection<EmailVerificationCode> EmailVerificationCodes { get; set; } = new List<EmailVerificationCode>();
-
-    // Helper properties
-    public string FullName => $"{FirstName} {LastName}";
+    public JobSeekerProfile? JobSeekerProfile { get; set; }
+    public RecruiterProfile? RecruiterProfile { get; set; }
+    public CompanyProfile? CompanyProfile { get; set; }
 }

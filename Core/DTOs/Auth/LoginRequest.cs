@@ -1,13 +1,14 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Core.DTOs.Auth;
-
-public class LoginRequest
+namespace backend.Core.DTOs.Auth
 {
-    [Required]
-    [EmailAddress]
-    public string Email { get; set; } = null!;
+    public class LoginRequest
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; }
 
-    [Required]
-    public string Password { get; set; } = null!;
+        [Required]
+        public string Password { get; set; }
+    }
 }
