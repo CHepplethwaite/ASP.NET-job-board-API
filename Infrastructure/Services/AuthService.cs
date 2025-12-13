@@ -7,7 +7,11 @@ using backend.Infrastructure.Data;
 using Core.Exceptions;
 using Core.Interfaces.Services;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Caching.Memory;
+using System.Collections.Concurrent;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text;
 
 namespace backend.Infrastructure.Services
 {
@@ -18,6 +22,182 @@ namespace backend.Infrastructure.Services
         private readonly IEmailService _emailService;
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AuthService> _logger;
+
+        // User caching with Lazy<Task<T>> for cache stampede protection
+        private readonly ConcurrentDictionary<string, Lazy<Task<CachedUserDto>>> _userLoadingTasks =
+            new ConcurrentDictionary<string, Lazy<Task<CachedUserDto>>>();
+
+        private async Task<CachedUserDto> GetUserByIdCachedAsync(string userId)
+        {
+            if (string.IsNullOrEmpty(userId)) return null;
+
+            var cacheKey = $"{USER_ID_CACHE_PREFIX}{userId}";
+
+            // Check cache first (hot path)
+            if (_cache.TryGetValue(cacheKey, out CachedUserDto cachedUser))
+            {
+                return cachedUser;
+            }
+
+            // Use Lazy<Task<T>> to prevent concurrent loads of the same user
+            var loadingTask = _userLoadingTasks.GetOrAdd(cacheKey, _ =>
+                new Lazy<Task<CachedUserDto>>(() => LoadAndCacheUserByIdAsync(userId, cacheKey)));
+
+            try
+            {
+                return await loadingTask.Value;
+            }
+            finally
+            {
+                // Clean up completed task to prevent memory leak
+                _userLoadingTasks.TryRemove(cacheKey, out _);
+            }
+        }
+
+        private async Task<CachedUserDto> LoadAndCacheUserByIdAsync(string userId, string cacheKey)
+        {
+            var user = await _userManager.FindByIdAsync(userId);
+
+            // Don't cache inactive users
+            if (user == null || !user.IsActive)
+            {
+                // Cache null results briefly to reduce database pressure
+                var nullOptions = new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(TimeSpan.FromSeconds(30))
+                    .SetSize(1); // Track size for MemoryCache eviction
+
+                _cache.Set(cacheKey, null, nullOptions);
+                return null;
+            }
+
+            var cachedUser = MapToCachedUserDto(user);
+            var cacheOptions = new MemoryCacheEntryOptions()
+                .SetAbsoluteExpiration(TimeSpan.FromMinutes(CACHE_TTL_MINUTES))
+                .SetSize(1);
+
+            _cache.Set(cacheKey, cachedUser, cacheOptions);
+
+            // Also cache by email for FindByEmailAsync
+            var emailCacheKey = $"{USER_EMAIL_CACHE_PREFIX}{HashEmail(user.Email)}";
+            _cache.Set(emailCacheKey, cachedUser, cacheOptions);
+
+            return cachedUser;
+        }
+
+        private async Task<CachedUserDto> GetUserByEmailCachedAsync(string email)
+        {
+            if (string.IsNullOrEmpty(email)) return null;
+
+            var cacheKey = $"{USER_EMAIL_CACHE_PREFIX}{HashEmail(email)}";
+
+            if (_cache.TryGetValue(cacheKey, out CachedUserDto cachedUser))
+            {
+                return cachedUser;
+            }
+
+            // Fall back to database lookup
+            var user = await _userManager.FindByEmailAsync(email);
+
+            // Don't cache inactive users
+            if (user == null || !user.IsActive)
+            {
+                var nullOptions = new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(TimeSpan.FromSeconds(30))
+                    .SetSize(1);
+
+                _cache.Set(cacheKey, null, nullOptions);
+                return null;
+            }
+
+            cachedUser = MapToCachedUserDto(user);
+            var cacheOptions = new MemoryCacheEntryOptions()
+                .SetAbsoluteExpiration(TimeSpan.FromMinutes(CACHE_TTL_MINUTES))
+                .SetSize(1);
+
+            _cache.Set(cacheKey, cachedUser, cacheOptions);
+
+            return cachedUser;
+        }
+
+        // Token validation caching - simple and safe
+        private async Task<ClaimsPrincipal> ValidateTokenWithCachingAsync(string token)
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+
+            if (!tokenHandler.CanReadToken(token))
+            {
+                return null;
+            }
+
+            var jwtToken = tokenHandler.ReadJwtToken(token);
+            var jti = jwtToken.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti)?.Value;
+
+            // Require jti claim for caching (prevents caching tokens without unique identifiers)
+            if (string.IsNullOrEmpty(jti))
+            {
+                return await ValidateTokenWithoutCacheAsync(token);
+            }
+
+            var cacheKey = $"{TOKEN_VALIDATION_CACHE_PREFIX}{jti}";
+
+            if (_cache.TryGetValue(cacheKey, out ClaimsPrincipal cachedPrincipal))
+            {
+                return cachedPrincipal;
+            }
+
+            var principal = await ValidateTokenWithoutCacheAsync(token);
+
+            // Only cache successful validations of access tokens
+            if (principal?.Identity?.IsAuthenticated == true)
+            {
+                // Never cache refresh tokens
+                var tokenType = principal.FindFirst("token_type")?.Value;
+                if (tokenType != "refresh")
+                {
+                    // Short sliding window with absolute cap
+                    var cacheOptions = new MemoryCacheEntryOptions()
+                        .SetSlidingExpiration(TimeSpan.FromSeconds(45))
+                        .SetAbsoluteExpiration(TimeSpan.FromMinutes(2))
+                        .SetSize(1);
+
+                    _cache.Set(cacheKey, principal, cacheOptions);
+                }
+            }
+
+            return principal;
+        }
+
+        // Email hashing for cache keys (deterministic and collision-safe)
+        private string HashEmail(string email)
+        {
+            using var sha256 = SHA256.Create();
+            var normalizedEmail = email.ToLowerInvariant().Trim();
+            var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(normalizedEmail));
+            return Convert.ToBase64String(hashBytes);
+        }
+
+        // Simple cache invalidation methods (no background services needed)
+        public void InvalidateUserCache(string userId, string email)
+        {
+            if (!string.IsNullOrEmpty(userId))
+            {
+                _cache.Remove($"{USER_ID_CACHE_PREFIX}{userId}");
+                _userLoadingTasks.TryRemove($"{USER_ID_CACHE_PREFIX}{userId}", out _);
+            }
+
+            if (!string.IsNullOrEmpty(email))
+            {
+                _cache.Remove($"{USER_EMAIL_CACHE_PREFIX}{HashEmail(email)}");
+            }
+        }
+
+        public void InvalidateTokenCache(string jti)
+        {
+            if (!string.IsNullOrEmpty(jti))
+            {
+                _cache.Remove($"{TOKEN_VALIDATION_CACHE_PREFIX}{jti}");
+            }
+        }
 
         // Issue #8: Implement Basic Caching
         // TODO: Add IMemoryCache or IDistributedCache dependency
