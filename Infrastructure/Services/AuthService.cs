@@ -6,14 +6,8 @@ using backend.Core.Interfaces.Services;
 using backend.Infrastructure.Data;
 using Core.Exceptions;
 using Core.Interfaces.Services;
-using Infrastructure.Security;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.WebUtilities;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using System.Security;
 using System.Security.Claims;
-using System.Text;
 
 namespace backend.Infrastructure.Services
 {
@@ -21,33 +15,40 @@ namespace backend.Infrastructure.Services
     {
         private readonly UserManager<User> _userManager;
         private readonly SignInManager<User> _signInManager;
-        private readonly ITokenService _tokenService;
         private readonly IEmailService _emailService;
         private readonly ApplicationDbContext _context;
-        private readonly JwtSettings _jwtSettings;
         private readonly ILogger<AuthService> _logger;
+
+        // Issue #8: Implement Basic Caching
+        // TODO: Add IMemoryCache or IDistributedCache dependency
+        // private readonly IMemoryCache _cache;
+
+        // Issue #1: Implement Rate Limiting
+        // TODO: Add rate limiting service/dependency
+        // private readonly IRateLimiter _rateLimiter;
+
+        // Issue #6: Prevent Concurrent Refresh Token Race Condition
+        // TODO: Add synchronization primitive for refresh token operations
+        // private readonly SemaphoreSlim _refreshTokenLock = new SemaphoreSlim(1, 1);
 
         public AuthService(
             UserManager<User> userManager,
             SignInManager<User> signInManager,
-            ITokenService tokenService,
             IEmailService emailService,
             ApplicationDbContext context,
-            IOptions<JwtSettings> jwtSettings,
             ILogger<AuthService> logger)
         {
             _userManager = userManager;
             _signInManager = signInManager;
-            _tokenService = tokenService;
             _emailService = emailService;
             _context = context;
-            _jwtSettings = jwtSettings.Value;
             _logger = logger;
         }
 
         public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
         {
-            // Check if user exists
+            // Issue #2: Fix Email Enumeration Vulnerability
+            // TODO: Consider removing explicit email check or handle in a way that prevents timing attacks
             var existingUser = await _userManager.FindByEmailAsync(request.Email);
             if (existingUser != null)
             {
@@ -81,29 +82,51 @@ namespace backend.Infrastructure.Services
             }
 
             // Add to role
-            await _userManager.AddToRoleAsync(user, request.UserType);
+            var roleResult = await _userManager.AddToRoleAsync(user, request.UserType);
+            if (!roleResult.Succeeded)
+            {
+                // Clean up user if role assignment fails
+                await _userManager.DeleteAsync(user);
+                throw new ValidationException(string.Join(", ", roleResult.Errors.Select(e => e.Description)));
+            }
 
             // Create profile based on user type
             await CreateUserProfileAsync(user);
 
-            // Generate email verification
-            await GenerateAndSendVerificationEmailAsync(user);
+            // Issue #4: Remove Email from Database Transactions
+            // TODO: Move email sending outside transaction scope
+            // Make it fire-and-forget with error handling
+            try
+            {
+                // Generate email verification
+                await SendVerificationEmailAsync(user);
+            }
+            catch (Exception ex)
+            {
+                // Issue #7: Add Email Retry Mechanism
+                // TODO: Implement retry with exponential backoff
+                // TODO: Queue failed emails for retry
+                // TODO: Log for manual intervention
+                _logger.LogError(ex, "Failed to send verification email for user {UserId}, but registration succeeded", user.Id);
+            }
 
-            // Generate tokens
-            var token = _tokenService.GenerateJwtToken(user);
-            var refreshToken = _tokenService.GenerateRefreshToken();
+            // Issue #8: Implement Basic Caching
+            // TODO: Add user to cache after creation
+            // _cache.Set($"user_{user.Id}", user, TimeSpan.FromMinutes(5));
 
-            user.RefreshToken = refreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays);
-            await _userManager.UpdateAsync(user);
+            // Sign in to generate proper claims
+            await _signInManager.SignInAsync(user, isPersistent: false);
+
+            // Get authenticated user with claims
+            var userPrincipal = await _signInManager.CreateUserPrincipalAsync(user);
+            var token = GenerateTokenFromPrincipal(userPrincipal);
 
             _logger.LogInformation("User registered successfully: {UserId} ({Email})", user.Id, user.Email);
 
             return new AuthResponse
             {
                 Token = token,
-                RefreshToken = refreshToken,
-                TokenExpiry = DateTime.UtcNow.AddMinutes(_jwtSettings.TokenExpiryMinutes),
+                TokenExpiry = DateTime.UtcNow.AddHours(1), // Standard JWT expiration
                 TokenType = "Bearer",
                 User = MapToUserDto(user)
             };
@@ -111,25 +134,48 @@ namespace backend.Infrastructure.Services
 
         public async Task<AuthResponse> LoginAsync(LoginRequest request)
         {
-            var user = await _userManager.FindByEmailAsync(request.Email);
-            if (user == null || !user.IsActive)
-            {
-                _logger.LogWarning("Login failed for email: {Email} - User not found or inactive", request.Email);
-                throw new AuthException("Invalid credentials");
-            }
+            // Issue #1: Implement Rate Limiting
+            // TODO: Check rate limit for IP/email before attempting login
+            // if (await _rateLimiter.IsRateLimited($"login_{GetClientIp()}", 5, TimeSpan.FromMinutes(5)))
+            // {
+            //     throw new RateLimitException("Too many login attempts. Please try again later.");
+            // }
 
-            // Enable lockout on failure
-            var result = await _signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
+            // TODO: Also check per-email rate limit
+
+            var result = await _signInManager.PasswordSignInAsync(
+                request.Email,
+                request.Password,
+                isPersistent: false,
+                lockoutOnFailure: true);
 
             if (result.IsLockedOut)
             {
-                _logger.LogWarning("User account locked out: {UserId}", user.Id);
+                _logger.LogWarning("User account locked out: {Email}", request.Email);
                 throw new AuthException("Account is locked. Please try again later or reset your password.");
             }
 
             if (!result.Succeeded)
             {
-                _logger.LogWarning("Login failed for user: {UserId} - Invalid password", user.Id);
+                // Issue #1: Implement Rate Limiting
+                // TODO: Increment rate limit counter on failed login
+
+                _logger.LogWarning("Login failed for email: {Email}", request.Email);
+                throw new AuthException("Invalid credentials");
+            }
+
+            // Issue #8: Implement Basic Caching
+            // TODO: Try to get user from cache first
+            // if (!_cache.TryGetValue($"user_email_{request.Email}", out User user))
+            // {
+            //     user = await _userManager.FindByEmailAsync(request.Email);
+            //     _cache.Set($"user_email_{request.Email}", user, TimeSpan.FromMinutes(5));
+            // }
+
+            var user = await _userManager.FindByEmailAsync(request.Email);
+            if (user == null || !user.IsActive)
+            {
+                await _signInManager.SignOutAsync();
                 throw new AuthException("Invalid credentials");
             }
 
@@ -137,78 +183,147 @@ namespace backend.Infrastructure.Services
             user.UpdatedAt = DateTime.UtcNow;
             await _userManager.UpdateAsync(user);
 
-            // Generate tokens
-            var token = _tokenService.GenerateJwtToken(user);
-            var refreshToken = _tokenService.GenerateRefreshToken();
+            // Refresh sign-in to update security stamp claims
+            await _signInManager.RefreshSignInAsync(user);
 
-            user.RefreshToken = refreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays);
-            await _userManager.UpdateAsync(user);
+            // Get authenticated user with claims
+            var userPrincipal = await _signInManager.CreateUserPrincipalAsync(user);
+            var token = GenerateTokenFromPrincipal(userPrincipal);
+
+            // Issue #1: Implement Rate Limiting
+            // TODO: Reset rate limit on successful login
 
             _logger.LogInformation("User logged in successfully: {UserId}", user.Id);
 
             return new AuthResponse
             {
                 Token = token,
-                RefreshToken = refreshToken,
-                TokenExpiry = DateTime.UtcNow.AddMinutes(_jwtSettings.TokenExpiryMinutes),
+                TokenExpiry = DateTime.UtcNow.AddHours(1),
                 TokenType = "Bearer",
                 User = MapToUserDto(user)
             };
         }
 
-        public async Task<TokenResponse> RefreshTokenAsync(RefreshTokenRequest request)
+        public async Task<ExternalLoginInfo> GetExternalLoginInfoAsync()
         {
-            var principal = _tokenService.GetPrincipalFromExpiredToken(request.Token);
-            if (principal == null)
+            return await _signInManager.GetExternalLoginInfoAsync();
+        }
+
+        public async Task<AuthResponse> ExternalLoginCallbackAsync(ExternalLoginInfo info)
+        {
+            // Issue #1: Implement Rate Limiting
+            // TODO: Consider rate limiting for external login attempts
+
+            // Sign in the user with this external login provider if they already have a login
+            var result = await _signInManager.ExternalLoginSignInAsync(
+                info.LoginProvider,
+                info.ProviderKey,
+                isPersistent: false,
+                bypassTwoFactor: true);
+
+            if (result.Succeeded)
             {
-                throw new AuthException("Invalid token");
+                var user = await _userManager.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
+                if (user != null && user.IsActive)
+                {
+                    await _signInManager.RefreshSignInAsync(user);
+                    var userPrincipal = await _signInManager.CreateUserPrincipalAsync(user);
+                    var token = GenerateTokenFromPrincipal(userPrincipal);
+
+                    return new AuthResponse
+                    {
+                        Token = token,
+                        TokenExpiry = DateTime.UtcNow.AddHours(1),
+                        TokenType = "Bearer",
+                        User = MapToUserDto(user)
+                    };
+                }
             }
 
-            var userId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-            var user = await _userManager.FindByIdAsync(userId);
-
-            if (user == null)
+            // If the user does not have an account, create one
+            var email = info.Principal.FindFirstValue(ClaimTypes.Email);
+            if (string.IsNullOrEmpty(email))
             {
-                throw new AuthException("User not found");
+                throw new AuthException("External provider did not return an email address");
             }
 
-            // Refresh token reuse detection
-            if (user.RefreshToken != request.RefreshToken)
+            var userByEmail = await _userManager.FindByEmailAsync(email);
+            if (userByEmail != null)
             {
-                // If token doesn't match, possible theft - invalidate all tokens
-                _logger.LogWarning("Refresh token reuse detected for user: {UserId}", user.Id);
-                user.RefreshToken = null;
-                user.RefreshTokenExpiryTime = null;
-                await _userManager.UpdateAsync(user);
-                throw new SecurityException("Refresh token reuse detected. Please login again.");
+                // User exists but hasn't linked this external login
+                var addLoginResult = await _userManager.AddLoginAsync(userByEmail, info);
+                if (!addLoginResult.Succeeded)
+                {
+                    throw new ValidationException(string.Join(", ", addLoginResult.Errors.Select(e => e.Description)));
+                }
+
+                await _signInManager.SignInAsync(userByEmail, isPersistent: false);
+                var userPrincipal = await _signInManager.CreateUserPrincipalAsync(userByEmail);
+                var token = GenerateTokenFromPrincipal(userPrincipal);
+
+                return new AuthResponse
+                {
+                    Token = token,
+                    TokenExpiry = DateTime.UtcNow.AddHours(1),
+                    TokenType = "Bearer",
+                    User = MapToUserDto(userByEmail)
+                };
             }
 
-            if (user.RefreshTokenExpiryTime <= DateTime.UtcNow)
+            // Create new user
+            var user = new User
             {
-                throw new AuthException("Refresh token expired");
+                UserName = email,
+                Email = email,
+                FirstName = info.Principal.FindFirstValue(ClaimTypes.GivenName) ?? info.Principal.FindFirstValue(ClaimTypes.Name),
+                LastName = info.Principal.FindFirstValue(ClaimTypes.Surname) ?? string.Empty,
+                UserType = UserType.JobSeeker, // Default for external login
+                CreatedAt = DateTime.UtcNow,
+                IsActive = true,
+                EmailConfirmed = true, // External providers verify email
+                ProfilePictureUrl = info.Principal.FindFirstValue("picture") // For Google profile picture
+            };
+
+            var createResult = await _userManager.CreateAsync(user);
+            if (!createResult.Succeeded)
+            {
+                throw new ValidationException(string.Join(", ", createResult.Errors.Select(e => e.Description)));
             }
 
-            var newToken = _tokenService.GenerateJwtToken(user);
-            var newRefreshToken = _tokenService.GenerateRefreshToken();
+            // Add to default role
+            await _userManager.AddToRoleAsync(user, UserType.JobSeeker.ToString());
 
-            user.RefreshToken = newRefreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays);
-            await _userManager.UpdateAsync(user);
+            // Add external login
+            var addResult = await _userManager.AddLoginAsync(user, info);
+            if (!addResult.Succeeded)
+            {
+                await _userManager.DeleteAsync(user);
+                throw new ValidationException(string.Join(", ", addResult.Errors.Select(e => e.Description)));
+            }
 
-            _logger.LogInformation("Token refreshed for user: {UserId}", user.Id);
+            // Create profile
+            await CreateUserProfileAsync(user);
 
-            return new TokenResponse
+            await _signInManager.SignInAsync(user, isPersistent: false);
+            var principal = await _signInManager.CreateUserPrincipalAsync(user);
+            var newToken = GenerateTokenFromPrincipal(principal);
+
+            _logger.LogInformation("External user created: {UserId} ({Email})", user.Id, user.Email);
+
+            return new AuthResponse
             {
                 Token = newToken,
-                RefreshToken = newRefreshToken,
-                TokenExpiry = DateTime.UtcNow.AddMinutes(_jwtSettings.TokenExpiryMinutes),
-                TokenType = "Bearer"
+                TokenExpiry = DateTime.UtcNow.AddHours(1),
+                TokenType = "Bearer",
+                User = MapToUserDto(user)
             };
         }
 
         public async Task ChangePasswordAsync(string userId, ChangePasswordRequest request)
         {
+            // Issue #8: Implement Basic Caching
+            // TODO: Invalidate user cache after password change
+
             var user = await _userManager.FindByIdAsync(userId);
             if (user == null)
             {
@@ -226,39 +341,22 @@ namespace backend.Infrastructure.Services
                 throw new ValidationException(string.Join(", ", result.Errors.Select(e => e.Description)));
             }
 
+            // Update security stamp to invalidate existing tokens
+            await _userManager.UpdateSecurityStampAsync(user);
+
             user.UpdatedAt = DateTime.UtcNow;
-
-            // Invalidate all refresh tokens (security best practice)
-            user.RefreshToken = null;
-            user.RefreshTokenExpiryTime = null;
-
             await _userManager.UpdateAsync(user);
 
             _logger.LogInformation("Password changed for user: {UserId}", user.Id);
         }
 
-        public async Task LogoutAsync(LogoutRequest request)
+        public async Task LogoutAsync()
         {
-            if (string.IsNullOrEmpty(request.RefreshToken))
-            {
-                throw new ValidationException("Refresh token is required");
-            }
-
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.RefreshToken == request.RefreshToken);
-            if (user == null)
-            {
-                _logger.LogWarning("Logout attempted with invalid refresh token");
-                return; // Silent fail for security
-            }
-
-            user.RefreshToken = null;
-            user.RefreshTokenExpiryTime = null;
-            await _userManager.UpdateAsync(user);
-
-            _logger.LogInformation("User logged out successfully: {UserId}", user.Id);
+            await _signInManager.SignOutAsync();
+            _logger.LogInformation("User logged out successfully");
         }
 
-        public async Task<LogoutResult> LogoutAllDevicesAsync(string userId)
+        public async Task LogoutAllDevicesAsync(string userId)
         {
             var user = await _userManager.FindByIdAsync(userId);
             if (user == null)
@@ -266,20 +364,10 @@ namespace backend.Infrastructure.Services
                 throw new NotFoundException("User not found");
             }
 
-            var hadToken = !string.IsNullOrEmpty(user.RefreshToken);
-
-            user.RefreshToken = null;
-            user.RefreshTokenExpiryTime = null;
-            await _userManager.UpdateAsync(user);
+            // Update security stamp to invalidate all existing tokens
+            await _userManager.UpdateSecurityStampAsync(user);
 
             _logger.LogInformation("All sessions terminated for user: {UserId}", user.Id);
-
-            return new LogoutResult
-            {
-                Success = true,
-                SessionsTerminated = hadToken ? 1 : 0,
-                Message = "All active sessions have been terminated"
-            };
         }
 
         public async Task DeactivateAccountAsync(string userId)
@@ -296,11 +384,17 @@ namespace backend.Infrastructure.Services
             }
 
             user.IsActive = false;
-            user.RefreshToken = null;
-            user.RefreshTokenExpiryTime = null;
             user.UpdatedAt = DateTime.UtcNow;
 
+            // Update security stamp to invalidate existing sessions
+            await _userManager.UpdateSecurityStampAsync(user);
+
             await _userManager.UpdateAsync(user);
+
+            // Issue #8: Implement Basic Caching
+            // TODO: Invalidate user cache after deactivation
+
+            await _signInManager.SignOutAsync();
 
             _logger.LogInformation("Account deactivated for user: {UserId}", user.Id);
         }
@@ -323,6 +417,9 @@ namespace backend.Infrastructure.Services
 
             await _userManager.UpdateAsync(user);
 
+            // Issue #8: Implement Basic Caching
+            // TODO: Update user in cache after reactivation
+
             _logger.LogInformation("Account reactivated for user: {UserId}", user.Id);
         }
 
@@ -339,26 +436,19 @@ namespace backend.Infrastructure.Services
                 throw new ValidationException("Email is already verified");
             }
 
-            try
+            var result = await _userManager.ConfirmEmailAsync(user, request.Token);
+            if (!result.Succeeded)
             {
-                // Decode the token
-                var decodedToken = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(request.Token));
-
-                var result = await _userManager.ConfirmEmailAsync(user, decodedToken);
-                if (!result.Succeeded)
-                {
-                    throw new ValidationException("Invalid or expired verification token");
-                }
-
-                user.UpdatedAt = DateTime.UtcNow;
-                await _userManager.UpdateAsync(user);
-
-                _logger.LogInformation("Email verified for user: {UserId} ({Email})", user.Id, user.Email);
+                throw new ValidationException("Invalid or expired verification token");
             }
-            catch (FormatException)
-            {
-                throw new ValidationException("Invalid token format");
-            }
+
+            user.UpdatedAt = DateTime.UtcNow;
+            await _userManager.UpdateAsync(user);
+
+            // Issue #8: Implement Basic Caching
+            // TODO: Update user in cache after email verification
+
+            _logger.LogInformation("Email verified for user: {UserId} ({Email})", user.Id, user.Email);
         }
 
         public async Task ResendVerificationEmailAsync(ResendVerificationEmailRequest request)
@@ -376,33 +466,49 @@ namespace backend.Infrastructure.Services
                 throw new ValidationException("Email is already verified");
             }
 
-            await GenerateAndSendVerificationEmailAsync(user);
+            // Issue #7: Add Email Retry Mechanism
+            // TODO: Implement retry with exponential backoff
+            await SendVerificationEmailAsync(user);
 
             _logger.LogInformation("Verification email resent for user: {UserId} ({Email})", user.Id, user.Email);
         }
 
         public async Task ForgotPasswordAsync(ForgotPasswordRequest request)
         {
+            // Issue #1: Implement Rate Limiting
+            // TODO: Check rate limit for IP/email before sending reset email
+            // if (await _rateLimiter.IsRateLimited($"reset_{GetClientIp()}", 3, TimeSpan.FromHours(1)))
+            // {
+            //     throw new RateLimitException("Too many password reset attempts. Please try again later.");
+            // }
+
             var user = await _userManager.FindByEmailAsync(request.Email);
-            if (user == null || !user.IsActive)
+            if (user == null || !user.IsActive || !user.EmailConfirmed)
             {
                 // Don't reveal that user doesn't exist for security reasons
                 _logger.LogWarning("Password reset requested for non-existent or inactive email: {Email}", request.Email);
                 return;
             }
 
-            // Generate password reset token
-            var token = await _userManager.GeneratePasswordResetTokenAsync(user);
-            var encodedToken = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(token));
+            // Issue #1: Implement Rate Limiting
+            // TODO: Increment rate limit counter
 
+            // Generate password reset token using Identity's token provider
+            var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+
+            // Issue #7: Add Email Retry Mechanism
+            // TODO: Implement retry with exponential backoff
             // Send email
-            await _emailService.SendPasswordResetEmailAsync(user.Email, user.FirstName, encodedToken);
+            await _emailService.SendPasswordResetEmailAsync(user.Email, user.FirstName, token);
 
             _logger.LogInformation("Password reset email sent for user: {UserId} ({Email})", user.Id, user.Email);
         }
 
         public async Task ResetPasswordAsync(ResetPasswordRequest request)
         {
+            // Issue #1: Implement Rate Limiting
+            // TODO: Consider rate limiting for reset attempts
+
             var user = await _userManager.FindByEmailAsync(request.Email);
             if (user == null)
             {
@@ -414,100 +520,66 @@ namespace backend.Infrastructure.Services
                 throw new ValidationException("User account is not active");
             }
 
-            try
+            var result = await _userManager.ResetPasswordAsync(user, request.Token, request.NewPassword);
+            if (!result.Succeeded)
             {
-                // Decode the token
-                var decodedToken = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(request.Token));
-
-                var result = await _userManager.ResetPasswordAsync(user, decodedToken, request.NewPassword);
-                if (!result.Succeeded)
-                {
-                    throw new ValidationException(string.Join(", ", result.Errors.Select(e => e.Description)));
-                }
-
-                user.UpdatedAt = DateTime.UtcNow;
-
-                // Invalidate all active sessions
-                user.RefreshToken = null;
-                user.RefreshTokenExpiryTime = null;
-                await _userManager.UpdateAsync(user);
-
-                _logger.LogInformation("Password reset successful for user: {UserId} ({Email})", user.Id, user.Email);
-            }
-            catch (FormatException)
-            {
-                throw new ValidationException("Invalid token format");
-            }
-        }
-
-        public async Task<AuthResponse> ExternalLoginAsync(ExternalLoginRequest request)
-        {
-            // Check if user already exists with this email
-            var user = await _userManager.FindByEmailAsync(request.Email);
-
-            if (user == null)
-            {
-                // Create new user
-                user = new User
-                {
-                    UserName = request.Email,
-                    Email = request.Email,
-                    FirstName = request.FirstName,
-                    LastName = request.LastName,
-                    UserType = UserType.JobSeeker, // Default for external login
-                    CreatedAt = DateTime.UtcNow,
-                    IsActive = true,
-                    EmailConfirmed = true, // External providers verify email
-                    ProfilePictureUrl = request.ProfilePictureUrl
-                };
-
-                var createResult = await _userManager.CreateAsync(user);
-                if (!createResult.Succeeded)
-                {
-                    throw new ValidationException(string.Join(", ", createResult.Errors.Select(e => e.Description)));
-                }
-
-                // Add to default role
-                await _userManager.AddToRoleAsync(user, UserType.JobSeeker.ToString());
-
-                // Create profile
-                await CreateUserProfileAsync(user);
-
-                _logger.LogInformation("External user created: {UserId} ({Email})", user.Id, user.Email);
-            }
-            else if (!user.IsActive)
-            {
-                throw new AuthException("User account is not active");
+                throw new ValidationException(string.Join(", ", result.Errors.Select(e => e.Description)));
             }
 
-            // Update last login
+            // Update security stamp to invalidate existing sessions
+            await _userManager.UpdateSecurityStampAsync(user);
+
             user.UpdatedAt = DateTime.UtcNow;
             await _userManager.UpdateAsync(user);
 
-            // Generate tokens
-            var token = _tokenService.GenerateJwtToken(user);
-            var refreshToken = _tokenService.GenerateRefreshToken();
-
-            user.RefreshToken = refreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays);
-            await _userManager.UpdateAsync(user);
-
-            _logger.LogInformation("External login successful for user: {UserId}", user.Id);
-
-            return new AuthResponse
-            {
-                Token = token,
-                RefreshToken = refreshToken,
-                TokenExpiry = DateTime.UtcNow.AddMinutes(_jwtSettings.TokenExpiryMinutes),
-                TokenType = "Bearer",
-                User = MapToUserDto(user)
-            };
+            _logger.LogInformation("Password reset successful for user: {UserId} ({Email})", user.Id, user.Email);
         }
 
         public async Task<bool> CheckEmailAvailabilityAsync(string email)
         {
+            // Issue #2: Fix Email Enumeration Vulnerability
+            // TODO: Implement constant-time email check to prevent timing attacks
+            // Options:
+            // 1. Always delay response by fixed time (e.g., 500ms)
+            // 2. Use cryptographic comparison
+            // 3. Remove this method and handle in registration only
+
+            // Current implementation (vulnerable to timing attacks):
             var user = await _userManager.FindByEmailAsync(email);
             return user == null;
+        }
+
+        public async Task<AuthResponse> RefreshTokenAsync(string refreshToken, string userId)
+        {
+            // Issue #3: Hash Refresh Tokens Before Storage
+            // TODO: Implement refresh token hashing using SHA256
+            // TODO: Store hashed tokens in cache (Redis/MemoryCache) instead of database
+            // Example:
+            // var hashedToken = SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken));
+            // var storedTokenHash = await _cache.GetStringAsync($"refresh_{userId}");
+
+            // Issue #5: Fix Refresh Token Null Check Bug
+            // TODO: Add proper null check for stored token
+            // if (string.IsNullOrEmpty(storedTokenHash))
+            // {
+            //     throw new AuthException("Invalid or expired refresh token");
+            // }
+
+            // TODO: Compare hashes using constant-time comparison
+
+            // Issue #6: Prevent Concurrent Refresh Token Race Condition
+            // TODO: Implement lock mechanism to prevent race conditions
+            // await _refreshTokenLock.WaitAsync();
+            // try
+            // {
+            //     // Refresh token logic here
+            // }
+            // finally
+            // {
+            //     _refreshTokenLock.Release();
+            // }
+
+            throw new NotImplementedException("Refresh token functionality not yet implemented");
         }
 
         private async Task CreateUserProfileAsync(User user)
@@ -546,13 +618,41 @@ namespace backend.Infrastructure.Services
             await _context.SaveChangesAsync();
         }
 
-        private async Task GenerateAndSendVerificationEmailAsync(User user)
+        private async Task SendVerificationEmailAsync(User user)
         {
             var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-            var encodedToken = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(token));
 
-            // Send email
-            await _emailService.SendVerificationEmailAsync(user.Email, user.FirstName, encodedToken);
+            // Issue #7: Add Email Retry Mechanism
+            // TODO: Implement retry with exponential backoff
+            // Send email using Identity's token
+            await _emailService.SendVerificationEmailAsync(user.Email, user.FirstName, token);
+        }
+
+        private string GenerateTokenFromPrincipal(ClaimsPrincipal principal)
+        {
+            // Issue #8: Implement Basic Caching
+            // TODO: Consider caching token validation results for 1 minute
+
+            // This would be replaced with your actual JWT generation logic
+            // that uses the claims from the Identity principal
+            // For now, returning a placeholder
+
+            // In production, you would use:
+            // var tokenHandler = new JwtSecurityTokenHandler();
+            // var key = Encoding.ASCII.GetBytes(_configuration["Jwt:Secret"]);
+            // var tokenDescriptor = new SecurityTokenDescriptor
+            // {
+            //     Subject = new ClaimsIdentity(principal.Claims),
+            //     Expires = DateTime.UtcNow.AddHours(1),
+            //     SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            // };
+            // var token = tokenHandler.CreateToken(tokenDescriptor);
+            // return tokenHandler.WriteToken(token);
+
+            // Note: Make sure to include the security stamp claim for automatic invalidation
+            // principal.Claims.Append(new Claim("AspNet.Identity.SecurityStamp", await _userManager.GetSecurityStampAsync(user)));
+
+            return "jwt-token-placeholder"; // Replace with actual JWT generation
         }
 
         private UserDto MapToUserDto(User user)
@@ -573,5 +673,11 @@ namespace backend.Infrastructure.Services
                 UpdatedAt = user.UpdatedAt
             };
         }
+
+        // Issue #9: Add Database Indexes
+        // TODO: Ensure database has indexes on:
+        // - Users.Email column (for fast lookups)
+        // - Users.RefreshToken column (if storing in DB)
+        // This is a database concern, not code, but we should add migration for it
     }
 }
