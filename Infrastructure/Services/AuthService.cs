@@ -22,6 +22,12 @@ namespace backend.Infrastructure.Services
         private readonly IEmailService _emailService;
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AuthService> _logger;
+        private readonly IMemoryCache _cache;
+        private const int CACHE_TTL_MINUTES = 10;
+        private const string USER_ID_CACHE_PREFIX = "user_id_";
+        private const string USER_EMAIL_CACHE_PREFIX = "user_email_";
+        private const string TOKEN_VALIDATION_CACHE_PREFIX = "token_";
+
 
         // User caching with Lazy<Task<T>> for cache stampede protection
         private readonly ConcurrentDictionary<string, Lazy<Task<CachedUserDto>>> _userLoadingTasks =
@@ -54,6 +60,15 @@ namespace backend.Infrastructure.Services
             }
         }
 
+        private string HashEmail(string email)
+        {
+            if (string.IsNullOrEmpty(email)) return string.Empty;
+
+            using var sha256 = SHA256.Create();
+            var normalizedEmail = email.ToLowerInvariant().Trim();
+            var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(normalizedEmail));
+            return Convert.ToBase64String(hashBytes);
+        }
         private async Task<CachedUserDto> LoadAndCacheUserByIdAsync(string userId, string cacheKey)
         {
             var user = await _userManager.FindByIdAsync(userId);
@@ -167,15 +182,6 @@ namespace backend.Infrastructure.Services
             return principal;
         }
 
-        // Email hashing for cache keys (deterministic and collision-safe)
-        private string HashEmail(string email)
-        {
-            using var sha256 = SHA256.Create();
-            var normalizedEmail = email.ToLowerInvariant().Trim();
-            var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(normalizedEmail));
-            return Convert.ToBase64String(hashBytes);
-        }
-
         // Simple cache invalidation methods (no background services needed)
         public void InvalidateUserCache(string userId, string email)
         {
@@ -199,10 +205,6 @@ namespace backend.Infrastructure.Services
             }
         }
 
-        // Issue #8: Implement Basic Caching
-        // TODO: Add IMemoryCache or IDistributedCache dependency
-        // private readonly IMemoryCache _cache;
-
         // Issue #1: Implement Rate Limiting
         // TODO: Add rate limiting service/dependency
         // private readonly IRateLimiter _rateLimiter;
@@ -216,13 +218,15 @@ namespace backend.Infrastructure.Services
             SignInManager<User> signInManager,
             IEmailService emailService,
             ApplicationDbContext context,
-            ILogger<AuthService> logger)
+            ILogger<AuthService> logger,
+            IMemoryCache cache)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _emailService = emailService;
             _context = context;
             _logger = logger;
+            _cache = cache;
         }
 
         public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
@@ -293,6 +297,8 @@ namespace backend.Infrastructure.Services
             // Issue #8: Implement Basic Caching
             // TODO: Add user to cache after creation
             // _cache.Set($"user_{user.Id}", user, TimeSpan.FromMinutes(5));
+            await LoadAndCacheUserByIdAsync(user.Id, $"{USER_ID_CACHE_PREFIX}{user.Id}");
+
 
             // Sign in to generate proper claims
             await _signInManager.SignInAsync(user, isPersistent: false);
@@ -352,7 +358,12 @@ namespace backend.Infrastructure.Services
             //     _cache.Set($"user_email_{request.Email}", user, TimeSpan.FromMinutes(5));
             // }
 
-            var user = await _userManager.FindByEmailAsync(request.Email);
+            var cachedUser = await GetUserByEmailCachedAsync(request.Email);
+            if (cachedUser == null) throw new AuthException("Invalid credentials");
+
+            // Use cached data where possible, only get fresh entity when needed for updates
+            var user = await _userManager.FindByIdAsync(cachedUser.Id);
+
             if (user == null || !user.IsActive)
             {
                 await _signInManager.SignOutAsync();
@@ -384,6 +395,20 @@ namespace backend.Infrastructure.Services
             };
         }
 
+        private CachedUserDto MapToCachedUserDto(User user)
+        {
+            return new CachedUserDto
+            {
+                Id = user.Id,
+                Email = user.Email,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                UserType = user.UserType.ToString(),
+                IsActive = user.IsActive,
+                EmailConfirmed = user.EmailConfirmed,
+                SecurityStamp = user.SecurityStamp
+            };
+        }
         public async Task<ExternalLoginInfo> GetExternalLoginInfoAsync()
         {
             return await _signInManager.GetExternalLoginInfoAsync();
@@ -526,6 +551,7 @@ namespace backend.Infrastructure.Services
 
             user.UpdatedAt = DateTime.UtcNow;
             await _userManager.UpdateAsync(user);
+            InvalidateUserCache(user.Id, user.Email);
 
             _logger.LogInformation("Password changed for user: {UserId}", user.Id);
         }
@@ -572,7 +598,7 @@ namespace backend.Infrastructure.Services
             await _userManager.UpdateAsync(user);
 
             // Issue #8: Implement Basic Caching
-            // TODO: Invalidate user cache after deactivation
+            InvalidateUserCache(user.Id, user.Email);
 
             await _signInManager.SignOutAsync();
 
@@ -599,6 +625,7 @@ namespace backend.Infrastructure.Services
 
             // Issue #8: Implement Basic Caching
             // TODO: Update user in cache after reactivation
+            InvalidateUserCache(user.Id, user.Email);
 
             _logger.LogInformation("Account reactivated for user: {UserId}", user.Id);
         }
@@ -627,6 +654,7 @@ namespace backend.Infrastructure.Services
 
             // Issue #8: Implement Basic Caching
             // TODO: Update user in cache after email verification
+            InvalidateUserCache(user.Id, user.Email);
 
             _logger.LogInformation("Email verified for user: {UserId} ({Email})", user.Id, user.Email);
         }
